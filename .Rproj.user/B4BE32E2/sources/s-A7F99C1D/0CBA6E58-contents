@@ -1,0 +1,61 @@
+# Model Tuning
+
+# Packages, Data ----------------------------------------------------------
+
+library(tidyverse)
+library(tidymodels)
+
+set.seed(61234)
+
+load("data/loans_train_processed.Rda")
+load("data/loans_folds.Rda")
+load("data/loans_test_processed.Rda")
+
+load("models/rf_tuned.rds")
+
+show_best(rf_tuned, metric = "accuracy")
+
+
+# Data Recipe -------------------------------------------------------------
+
+loans_recipe <- recipe(hi_int_prncp_pd ~ ., loans_train) %>%
+  # id is a label for the row
+  step_rm(id) %>%
+  # impute missing data
+  step_impute_knn(all_predictors()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = T) %>%
+  step_normalize(all_predictors())
+
+
+# Data Model --------------------------------------------------------------
+
+rf_model <- rand_forest(mode = "classification",
+                        min_n = tune(),
+                        mtry = tune()) %>%
+  set_engine("ranger")
+
+
+# Workflow ----------------------------------------------------------------
+
+rf_workflow_finalized <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(loans_recipe) %>%
+  finalize_workflow(select_best(rf_tuned, metric = "accuracy"))
+
+rf_tuned_finalized <- fit(rf_workflow_finalized, loans_train)
+
+# Write out results & workflow
+save(rf_tuned_finalized, file = "models/rf_tuned_finalized.rds")
+
+
+# Predictions -------------------------------------------------------------
+
+results <- predict(rf_tuned_finalized, new_data = loans_test) %>%
+  bind_cols(loans_test %>% select(id))
+
+results <- results %>%
+  rename(Id = id,
+         Category = .pred_class) %>%
+  select(Id, Category)
+
+write_csv(results, file = "data/submission_rf.csv")

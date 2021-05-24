@@ -1,0 +1,51 @@
+# Model Tuning
+
+# Packages, Data ----------------------------------------------------------
+
+library(tidyverse)
+library(tidymodels)
+
+set.seed(61234)
+
+load("data/loans_train_processed.Rda")
+load("data/loans_folds.Rda")
+
+
+# Data Recipe -------------------------------------------------------------
+
+loans_recipe <- recipe(hi_int_prncp_pd ~ ., loans_train) %>%
+  # id is a label for the row
+  step_rm(id) %>%
+  # impute missing data
+  step_impute_knn(all_predictors()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = T) %>%
+  step_normalize(all_predictors())
+
+
+# Data Model --------------------------------------------------------------
+
+rf_model <- rand_forest(mode = "classification",
+                        min_n = tune(),
+                        mtry = tune()) %>%
+  set_engine("ranger")
+
+
+# Parameters --------------------------------------------------------------
+
+rf_params <- parameters(rf_model) %>%
+  update(mtry = mtry(range = c(1, 50)))
+rf_grid <- grid_regular(rf_params, levels = 1)
+
+
+# Workflow ----------------------------------------------------------------
+
+rf_workflow <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(loans_recipe)
+
+rf_tuned <- rf_workflow %>%
+  tune_grid(resamples = loans_folds,
+            grid = rf_grid)
+
+# Write out results & workflow
+save(rf_tuned, file = "models/rf_tuned.rds")

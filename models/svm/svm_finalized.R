@@ -1,0 +1,58 @@
+# SVM Finalized
+
+# Packages, Data ----------------------------------------------------------
+
+library(tidyverse)
+library(tidymodels)
+
+set.seed(61234)
+
+load("data/loans_train_processed.Rda")
+load("data/loans_folds.Rda")
+load("data/loans_test_processed.Rda")
+
+load("models/svm/svm_tuned.rds")
+
+
+# Data Recipe -------------------------------------------------------------
+
+loans_recipe <- recipe(hi_int_prncp_pd ~ ., loans_train) %>%
+  # Removing id (label for the row) and state (throws errors due to "missing data")
+  step_rm(id, addr_state) %>%
+  # Imputing missing data
+  step_impute_knn(all_predictors()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = T) %>%
+  step_normalize(all_predictors())
+
+# Data Model --------------------------------------------------------------
+
+svm_model <- svm_rbf(mode = "classification",
+                     cost = tune(),
+                     rbf_sigma = tune()) %>%
+  set_engine("kernlab")
+
+
+# Workflow ----------------------------------------------------------------
+
+svm_workflow_finalized <- workflow() %>%
+  add_model(svm_model) %>%
+  add_recipe(loans_recipe) %>%
+  finalize_workflow(select_best(svm_tuned, metric = "accuracy"))
+
+svm_trained <- fit(svm_workflow_finalized, loans_train)
+
+# Write out results
+save(svm_trained, file = "models/svm/svm_finalized.rds")
+
+
+# Predictions -------------------------------------------------------------
+
+results <- predict(svm_trained, new_data = loans_test) %>%
+  bind_cols(loans_test %>% select(id))
+
+results <- results %>%
+  rename(Id = id,
+         Category = .pred_class) %>%
+  select(Id, Category)
+
+write_csv(results, file = "data/submission_svm.csv")

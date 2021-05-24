@@ -1,0 +1,60 @@
+# Boosted Finalized
+
+# Packages, Data ----------------------------------------------------------
+
+library(tidyverse)
+library(tidymodels)
+
+set.seed(61234)
+
+load("data/loans_train_processed.Rda")
+load("data/loans_folds.Rda")
+load("data/loans_test_processed.Rda")
+
+load("models/bt/bt_tuned_state.rds")
+
+show_best(bt_tuned, metric = "accuracy")
+
+# Data Recipe -------------------------------------------------------------
+
+loans_recipe <- recipe(hi_int_prncp_pd ~ ., loans_train) %>%
+  # id is a label for the row
+  step_rm(id) %>%
+  # impute missing data
+  step_impute_knn(all_predictors()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = T) %>%
+  step_normalize(all_predictors())
+
+# Data Model --------------------------------------------------------------
+
+bt_model <- boost_tree(mode = "classification",
+                       mtry = tune(),
+                       min_n = tune(),
+                       learn_rate = tune()) %>%
+  set_engine("xgboost")
+
+
+# Workflow ----------------------------------------------------------------
+
+bt_workflow_finalized <- workflow() %>%
+  add_model(bt_model) %>%
+  add_recipe(loans_recipe) %>%
+  finalize_workflow(select_best(bt_tuned, metric = "accuracy"))
+
+bt_tuned_finalized <- fit(bt_workflow_finalized, loans_train)
+
+# Write out results
+save(bt_tuned_finalized, file = "models/bt/bt_finalized_state.rds")
+
+
+# Generating Predictions --------------------------------------------------
+
+results <- predict(bt_tuned_finalized, new_data = loans_test) %>%
+  bind_cols(loans_test %>% select(id))
+
+results <- results %>%
+  rename(Id = id,
+         Category = .pred_class) %>%
+  select(Id, Category)
+
+write_csv(results, file = "data/submission_bt_state.csv")

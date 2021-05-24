@@ -1,0 +1,51 @@
+# Model Tuning
+
+# Packages, Data ----------------------------------------------------------
+
+library(tidyverse)
+library(tidymodels)
+
+set.seed(61234)
+
+load("data/loans_train_processed.Rda")
+load("data/loans_folds.Rda")
+
+# Data Recipe -------------------------------------------------------------
+
+loans_recipe <- recipe(hi_int_prncp_pd ~ ., loans_train) %>%
+  # id is a label for the row
+  step_rm(id, addr_state) %>%
+  # impute missing data
+  step_impute_knn(all_predictors()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = T) %>%
+  step_normalize(all_predictors())
+
+# Data Model --------------------------------------------------------------
+
+bt_model <- boost_tree(mode = "classification",
+                       mtry = tune(),
+                       min_n = tune(),
+                       learn_rate = tune()) %>%
+  set_engine("xgboost")
+
+
+# Parameters --------------------------------------------------------------
+
+bt_params <- parameters(bt_model) %>%
+  update(mtry = mtry(range = c(2, 50)),
+         learn_rate = learn_rate(range = c(-1, 0.01)))
+bt_grid <- grid_regular(bt_params, levels = 10)
+
+
+# Workflow ----------------------------------------------------------------
+
+bt_workflow <- workflow() %>%
+  add_model(bt_model) %>%
+  add_recipe(loans_recipe)
+
+bt_tuned <- bt_workflow %>%
+  tune_grid(resamples = loans_folds,
+            grid = bt_grid)
+
+# Write out results & workflow
+save(bt_tuned, file = "models/bt_tuned.rds")
